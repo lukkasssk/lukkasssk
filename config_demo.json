@@ -27,12 +27,14 @@
       "id": 1,
       "name": "VIP Geral",
       "group_id": -1002265185144,
+      "group_link": "https://t.me/+abc123def456",
       "is_active": true
     },
     {
       "id": 2,
       "name": "VIP Premium",
       "group_id": -1002265185144,
+      "group_link": "https://t.me/+xyz789uvw012",
       "is_active": true
     }
   ],

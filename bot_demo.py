@@ -283,9 +283,8 @@ async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
             msg = '🎉 <b>Acesso VIP Liberado!</b>\n\n<b>Grupos VIP do seu plano:</b>\n'
             for g in grupos_ativos:
                 nome = g.get('name', 'Grupo VIP')
-                group_id = g.get('group_id')
-                link = g.get('group_link') or (f'https://t.me/c/{abs(group_id)}' if group_id else 'https://t.me/')
-                msg += f'• <b>{nome}</b>: <a href="{link}">{link}</a>\n'
+                group_link = g.get('group_link', 'https://t.me/')
+                msg += f'• <b>{nome}</b>: <a href="{group_link}">{group_link}</a>\n'
             msg += '\n⚠️ Estes links são apenas para demonstração.'
             await context.bot.send_message(chat_id=user_id, text=msg, parse_mode='HTML', disable_web_page_preview=True)
     # Enviar comandos de teste
