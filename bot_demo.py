@@ -283,7 +283,7 @@ async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
             msg = '🎉 <b>Acesso VIP Liberado!</b>\n\n<b>Grupos VIP do seu plano:</b>\n'
             for g in grupos_ativos:
                 nome = g.get('name', 'Grupo VIP')
-                group_link = g.get('group_link', 'https://t.me/')
+                group_link = await get_group_invite_link(context.bot, g)
                 msg += f'• <b>{nome}</b>: <a href="{group_link}">{group_link}</a>\n'
             msg += '\n⚠️ Estes links são apenas para demonstração.'
             await context.bot.send_message(chat_id=user_id, text=msg, parse_mode='HTML', disable_web_page_preview=True)
@@ -296,6 +296,33 @@ async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
         "\nUse os comandos acima para testar as funções administrativas do bot demo."
     )
     await context.bot.send_message(chat_id=user_id, text=comandos, parse_mode='HTML')
+
+# Função para gerar link de convite para um grupo
+async def generate_invite_link(bot, group_id):
+    try:
+        # Tenta criar um link de convite para o grupo
+        chat_invite_link = await bot.create_chat_invite_link(
+            chat_id=group_id,
+            creates_join_request=False,
+            expire_date=None,  # Link não expira
+            member_limit=None  # Sem limite de membros
+        )
+        return chat_invite_link.invite_link
+    except Exception as e:
+        logger.error(f"Erro ao gerar link de convite para grupo {group_id}: {e}")
+        # Se não conseguir gerar, retorna um link de fallback
+        return f"https://t.me/c/{abs(group_id)}"
+
+# Função para obter ou gerar link de convite para um grupo
+async def get_group_invite_link(bot, group):
+    group_id = group.get('group_id')
+    
+    # Tenta gerar um novo link de convite
+    if group_id:
+        return await generate_invite_link(bot, group_id)
+    
+    # Fallback
+    return "https://t.me/"
 
 # Handler para /testarbroadcast
 def get_all_users_ids():
