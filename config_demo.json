@@ -1,0 +1,84 @@
+{
+  "bot_token": "7987163504:AAHGQ3ebgC8TkTASUuoAyTbybMhpk2_IoZA",
+  "admin_id": 6423539592,
+  "admin_user": "saikathesun",
+  "pix_demo_qrcode": "00020101021226810014br.gov.bcb.pix2559qr.woovi.com/qr/v2/cob/2365b640-748a-4ba0-8e81-b3bb70abe4bd520400005303986540549.905802BR5911CN_PAY_LTDA6009Sao_Paulo6229052595bf9c63034f4a75b7985d62663046AE6",
+  "messages": {
+    "welcome": "teste",
+    "payment_instructions": "Para simular o pagamento, clique no botão abaixo.",
+    "payment_success": "Pagamento aprovado! Você agora é VIP (DEMO).",
+    "payment_error": "Ocorreu um erro na simulação do pagamento.",
+    "broadcast_prefix": "[BROADCAST DEMO]"
+  },
+  "payment_methods": {
+    "pix_demo": {
+      "enabled": true,
+      "description": "PIX Simulado para demonstração"
+    }
+  },
+  "broadcast": {
+    "enabled": true,
+    "default_target": "all",
+    "allow_video": true,
+    "allow_buttons": true
+  },
+  "vip_groups": [
+    {
+      "id": 1,
+      "name": "VIP Geral",
+      "group_id": -1002265185144,
+      "is_active": true
+    },
+    {
+      "id": 2,
+      "name": "VIP Premium",
+      "group_id": -1002265185144,
+      "is_active": true
+    }
+  ],
+  "plans": [
+    {
+      "id": 1,
+      "name": "VIP Mensal",
+      "price": 29.9,
+      "duration_days": 30,
+      "description": "Acesso VIP por 30 dias"
+    },
+    {
+      "id": 2,
+      "name": "VIP Trimestral",
+      "price": 79.9,
+      "duration_days": 90,
+      "description": "Acesso VIP por 90 dias"
+    },
+    {
+      "id": 3,
+      "name": "VIP Permanente",
+      "price": 199.9,
+      "duration_days": -1,
+      "description": "Acesso vitalício a todos os recursos VIP"
+    }
+  ],
+  "subscriptions": [
+    {
+      "user_id": 7258291634,
+      "plan_id": 1,
+      "plan_name": "VIP Mensal",
+      "start_date": "2025-06-25 15:37:23",
+      "end_date": "2025-07-25 15:37:23",
+      "is_permanent": false
+    }
+  ],
+  "database": {
+    "host": "switchback.proxy.rlwy.net",
+    "port": 53702,
+    "user": "root",
+    "password": "ZffaVENMUMTrPeOlZjvkmtxfoKawiDHb",
+    "database": "bot_demo"
+  },
+  "welcome_file": {
+    "file_id": "BAACAgEAAxkBAAIEV2hcU-RRv6FdMMXNOeXjHhqafzmuAAJEBQACJp_hRkUDL8HCCCe7NgQ",
+    "file_type": "video",
+    "caption": "teste"
+  }
+}
