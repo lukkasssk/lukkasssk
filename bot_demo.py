@@ -17,7 +17,6 @@ import mysql.connector
 import requests
 import hashlib
 import hmac
-from flask import Flask, jsonify
 import re
 
 # Banco de dados real, mas só SELECT para usuários
