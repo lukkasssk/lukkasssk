@@ -3,7 +3,7 @@ import logging
 import os
 import asyncio
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 import threading
 import time
@@ -276,7 +276,9 @@ async def process_start_normal(update: Update, context: ContextTypes.DEFAULT_TYP
             keyboard.append([InlineKeyboardButton(f"💎 {plan['name']} - R${plan['price']}", callback_data=f"plan_{plan['id']}")])
         if keyboard:
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await update.message.reply_text(msg, reply_markup=reply_markup)
+            config = load_config()
+            msg_planos = config.get('messages', {}).get('planos_disponiveis', 'Escolha um dos planos VIP disponíveis:')
+            await update.message.reply_text(msg_planos, reply_markup=reply_markup)
         else:
             await update.message.reply_text(msg)
         return
@@ -285,7 +287,9 @@ async def process_start_normal(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     keyboard = [[InlineKeyboardButton(f"💎 {plan['name']} - R${plan['price']}", callback_data=f"plan_{plan['id']}")] for plan in plans]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Escolha um dos planos VIP disponíveis:", reply_markup=reply_markup)
+    config = load_config()
+    msg_planos = config.get('messages', {}).get('planos_disponiveis', 'Escolha um dos planos VIP disponíveis:')
+    await update.message.reply_text(msg_planos, reply_markup=reply_markup)
 
 # Seleção de plano
 async def handle_plan_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -379,6 +383,18 @@ async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
             for g in grupos_ativos:
                 nome = g.get('name', 'Grupo VIP')
                 group_link = await get_group_invite_link(context.bot, g)
+                # Salvar o link no JSON de config
+                config = load_config()
+                for sub in config.get('subscriptions', []):
+                    if sub['user_id'] == user_id and sub['plan_id'] == plan_id:
+                        # Remover campo antigo invite_link se existir
+                        if 'invite_link' in sub:
+                            del sub['invite_link']
+                        invite_links = sub.get('invite_links', {})
+                        invite_links[str(g['group_id'])] = group_link
+                        sub['invite_links'] = invite_links
+                        break
+                save_config(config)
                 msg += f'• <b>{nome}</b>: <a href="{group_link}">{group_link}</a>\n'
             msg += '\n⚠️ Estes links são apenas para demonstração.'
             await context.bot.send_message(chat_id=user_id, text=msg, parse_mode='HTML', disable_web_page_preview=True)
@@ -388,7 +404,13 @@ async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
         "• /testarbroadcast — Simula o envio de broadcast para todos.\n"
         "• /testarnotificacao — Simula notificação de renovação de assinatura.\n"
         "• /testarremocao — Simula remoção do VIP (expiração).\n"
-        "\nUse os comandos acima para testar as funções administrativas do bot demo."
+        "\n<b>Comandos principais:</b>\n"
+        "• /start — Inicia o bot e mostra os planos VIP.\n"
+        "• /vip — Mostra seus links VIP ativos.\n"
+        "• /meusdados — Exibe seus dados cadastrados.\n"
+        "• /ajuda — Mostra a lista de comandos e ajuda.\n"
+        "• /admin — Painel administrativo\n"
+        "\nUse os comandos acima para testar as funções administrativas e principais do bot demo."
     )
     await context.bot.send_message(chat_id=user_id, text=comandos, parse_mode='HTML')
 
@@ -461,11 +483,30 @@ async def testarnotificacao(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Handler para /testarremocao
 async def testarremocao(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = load_config()
-    if str(update.effective_user.id) != str(config['admin_id']):
-        await update.message.reply_text("Acesso negado.")
-        return
     user_id = update.effective_user.id
-    MEMORY_USERS_VIP.discard(user_id)
+    subs = [s for s in config.get('subscriptions', []) if s['user_id'] == user_id]
+    if not subs:
+        await update.message.reply_text("Você não possui assinatura VIP ativa para testar remoção.")
+        return
+    for sub in subs:
+        for dias in [3, 2, 1]:
+            await update.message.reply_text(
+                f"⚠️ Sua assinatura VIP está próxima de expirar!\n"
+                f"Plano: {sub['plan_name']}\n"
+                f"Dias restantes: {dias}\n"
+                f"Data de expiração: {sub['end_date']}\n\n"
+                f"Para renovar seu acesso VIP, use /start e escolha um novo plano! 🎉"
+            )
+            await asyncio.sleep(1)
+        # Mensagem de remoção
+        await update.message.reply_text(
+            f"🚫 Sua assinatura VIP do plano {sub['plan_name']} foi expirada/removida por falta de renovação (DEMO)."
+        )
+    # Remove todas as assinaturas do usuário
+    config['subscriptions'] = [s for s in config.get('subscriptions', []) if s['user_id'] != user_id]
+    save_config(config)
+    if user_id in MEMORY_USERS_VIP:
+        MEMORY_USERS_VIP.remove(user_id)
     await update.message.reply_text("✅ Simulação de remoção do VIP concluída. Use /vip para verificar.")
 
 # Handler para /testarwebhook
@@ -575,10 +616,56 @@ async def testarleads(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Comando /vip
 async def vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in MEMORY_USERS_VIP:
-        await update.message.reply_text("🎉 Você é VIP (DEMO)! Aproveite o acesso aos recursos exclusivos.")
-    else:
-        await update.message.reply_text("Você não é VIP ainda. Use /start para simular uma assinatura.")
+    config = load_config()
+
+    groups = config.get('vip_groups', [])
+    subs = [s for s in config.get('subscriptions', []) if s['user_id'] == user_id]
+
+    if not subs:
+        await update.message.reply_text("❌ Você não possui assinatura VIP ativa.")
+        return
+
+    msg = "🎉 Você é VIP (DEMO)! Aproveite o acesso aos recursos exclusivos.\n\n"
+    msg += "<b>Suas assinaturas:</b>\n"
+
+    # Armazenar os IDs de grupos que o usuário tem acesso
+    allowed_group_ids = set()
+
+    for sub in subs:
+        plano = sub['plan_name']
+        expira = sub['end_date']
+        permanente = sub.get('is_permanent', False)
+        status = "Permanente" if permanente else f"Expira em: {expira}"
+        msg += f"• {plano} — {status}\n"
+
+        # Regra: plano.id == group.id
+        allowed_group_ids.add(sub['plan_id'])
+
+    # Adicionar links dos grupos VIP com base nessa regra
+    group_links = []
+
+    for group in groups:
+        if group.get('is_active') and group['id'] in allowed_group_ids:
+            nome = group['name']
+            group_id_str = str(group['group_id'])
+            link = None
+
+            for sub in subs:
+                invite_links = sub.get('invite_links', {})
+                if group_id_str in invite_links:
+                    link = invite_links[group_id_str]
+                    break
+
+            if not link:
+                link = f"https://t.me/joinchat/{abs(int(group_id_str))}"
+            
+            group_links.append(f"• {nome}: {link}")
+
+    if group_links:
+        msg += "\n<b>Links dos grupos VIP:</b>\n"
+        msg += "\n".join(group_links)
+
+    await update.message.reply_text(msg, parse_mode='HTML')
 
 # Comando /meusdados
 async def meusdados(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -741,10 +828,6 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Verificar se é o admin (por ID e username)
     is_admin = (user_id == admin_id) and (username == admin_user)
     
-    if not is_admin:
-        await update.message.reply_text("❌ Acesso negado. Apenas administradores podem usar este comando.")
-        return
-    
     # Menu básico para todos os usuários cadastrados
     keyboard = [
         [InlineKeyboardButton("📊 Estatísticas", callback_data="admin_stats")],
@@ -773,12 +856,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     username = update.effective_user.username
     
-    # Verificar se é o admin (por ID e username)
-    is_admin = (user_id == admin_id) and (username == admin_user)
-    
-    if not is_admin:
-        await query.message.edit_text("❌ Acesso negado. Apenas administradores podem usar este painel.")
-        return
+
     
     # Handler para limpar dados de contato
     if query.data == "clear_contact_data":
@@ -931,6 +1009,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             [InlineKeyboardButton("✅ Mensagem de Sucesso", callback_data="admin_edit_success_message")],
             [InlineKeyboardButton("❌ Mensagem de Erro", callback_data="admin_edit_error_message")],
             [InlineKeyboardButton("📝 Instruções PIX", callback_data="admin_edit_pix_instructions")],
+            [InlineKeyboardButton("📋 Mensagem de Planos", callback_data="admin_edit_planos_message")],
             [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -940,6 +1019,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         text += f"✅ Sucesso: {messages.get('payment_success', 'Não definida')[:50]}...\n\n"
         text += f"❌ Erro: {messages.get('payment_error', 'Não definida')[:50]}...\n\n"
         text += f"📝 PIX: {messages.get('pix_automatico_instructions', 'Não definida')[:50]}...\n\n"
+        text += f"📋 Planos: {messages.get('planos_disponiveis', 'Não definida')[:50]}...\n\n"
         text += "Escolha uma mensagem para editar:"
         await query.message.edit_text(text, reply_markup=reply_markup)
         return
@@ -1007,6 +1087,19 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=reply_markup
         )
         context.user_data['editing_message'] = 'pix_automatico_instructions'
+        return
+    elif query.data == "admin_edit_planos_message":
+        config = load_config()
+        messages = config.get('messages', {})
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_edit_messages")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.edit_text(
+            "📋 Editar Mensagem de Planos\n\n"
+            f"Mensagem atual:\n{messages.get('planos_disponiveis', 'Não definida')}\n\n"
+            "Envie a nova mensagem para exibir os planos:",
+            reply_markup=reply_markup
+        )
+        context.user_data['editing_message'] = 'planos_disponiveis'
         return
     
     # Handler para broadcast
@@ -1931,6 +2024,8 @@ async def handle_alterar_email(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         
         logger.info(f"📧 E-mail alterado para usuário {user_id}: {email}")
+        await asyncio.sleep(0.5)
+        await meusdados(update, context)
         
     except Exception as e:
         await update.message.reply_text(f"❌ Erro ao alterar e-mail: {e}")
@@ -1969,6 +2064,8 @@ async def handle_alterar_telefone(update: Update, context: ContextTypes.DEFAULT_
         )
         
         logger.info(f"📱 Telefone alterado para usuário {user_id}: {formatted_phone}")
+        await asyncio.sleep(0.5)
+        await meusdados(update, context)
         
     except Exception as e:
         await update.message.reply_text(f"❌ Erro ao alterar telefone: {e}")
@@ -2021,10 +2118,78 @@ async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"✅ Sucesso: {messages.get('payment_success', 'Não definida')[:50]}...\n\n"
         text += f"❌ Erro: {messages.get('payment_error', 'Não definida')[:50]}...\n\n"
         text += f"📝 PIX: {messages.get('pix_automatico_instructions', 'Não definida')[:50]}...\n\n"
+        text += f"📋 Planos: {messages.get('planos_disponiveis', 'Não definida')[:50]}...\n\n"
         text += "Escolha uma mensagem para editar:"
         await update.message.reply_text(text, reply_markup=reply_markup)
         return
     # ... resto do handler ...
+
+# Handler para /testarrenovacao (fluxo realista)
+async def testarrenovacao(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    config = load_config()
+    subs = [s for s in config.get('subscriptions', []) if s['user_id'] == user_id]
+    if not subs:
+        await update.message.reply_text("Você não possui assinatura VIP ativa para testar renovação.")
+        return
+    for sub in subs:
+        plano = sub['plan_name']
+        end_date = sub['end_date']
+        keyboard = [[InlineKeyboardButton(f"🔄 Renovar {plano}", callback_data=f"demo_renovar_{sub['plan_id']}")]]
+        await update.message.reply_text(
+            f"Assinatura: <b>{plano}</b>\nExpira em: {end_date}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+
+# Handler do botão de renovação simulada
+async def handle_demo_renovar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    plan_id = int(query.data.split('_')[-1])
+    config = load_config()
+    # Buscar assinatura
+    sub = next((s for s in config.get('subscriptions', []) if s['user_id'] == user_id and s['plan_id'] == plan_id), None)
+    if not sub:
+        await query.message.reply_text("Assinatura não encontrada.")
+        return
+    plano = sub['plan_name']
+    # Simular pagamento PIX
+    fake_pix = config.get('pix_demo_qrcode', f"000201010212...FAKEPIX...{plan_id}{user_id}")
+    # Gerar QR Code fake
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(fake_pix)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
+    await query.message.edit_media(
+        media=InputMediaPhoto(img_byte_arr, caption=f"<b>Pagamento via PIX</b>\n\nPlano: {plano}\nValor: Simulado\n\nEscaneie o QR Code abaixo ou copie o código PIX:\n<code>{fake_pix}</code>\n\nAguardando pagamento...", parse_mode='HTML')
+    )
+    # Espera 3 segundos e aprova
+    await asyncio.sleep(3)
+    # Renovar assinatura
+    try:
+        end_date = sub['end_date']
+        if isinstance(end_date, str):
+            end_date_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
+        else:
+            end_date_dt = end_date
+        dias = sub.get('duration_days', 30)
+        nova_data = end_date_dt + timedelta(days=dias)
+        sub['end_date'] = nova_data.strftime('%Y-%m-%d %H:%M:%S')
+        save_config(config)
+        # Após aprovação, apague o QR Code e envie só o texto de sucesso
+        await query.message.delete()
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=f"✅ Pagamento simulado aprovado!\n\nSua assinatura do plano <b>{plano}</b> foi renovada.\nNova expiração: {sub['end_date']}",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        await query.message.reply_text(f"Erro ao renovar: {e}")
 
 # Handlers
 
@@ -2076,6 +2241,8 @@ def main():
     application.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, handle_admin_files))
     # Adicionar handler para fotos
     application.add_handler(MessageHandler(filters.PHOTO, handle_admin_files))
+    application.add_handler(CommandHandler("testarrenovacao", testarrenovacao))
+    application.add_handler(CallbackQueryHandler(handle_demo_renovar, pattern=r"^demo_renovar_"))
     application.run_polling()
 
 class DatabaseDemo:
@@ -2129,6 +2296,25 @@ class DatabaseDemo:
 # db.execute('INSERT INTO ...')
 # rows = db.execute_query('SELECT * FROM ...')
 # db.close()
+
+# Função utilitária para migrar invite_link antigo para invite_links por grupo
+
+def migrar_invite_links():
+    config = load_config()
+    grupos = config.get('vip_groups', [])
+    for sub in config.get('subscriptions', []):
+        if 'invite_link' in sub:
+            invite_link = sub['invite_link']
+            invite_links = sub.get('invite_links', {})
+            for g in grupos:
+                if g.get('is_active'):
+                    group_id = str(g['group_id'])
+                    invite_links[group_id] = invite_link
+            sub['invite_links'] = invite_links
+            del sub['invite_link']
+    save_config(config)
+
+# Para rodar manualmente, basta chamar migrar_invite_links() no Python shell ou em algum comando temporário.
 
 if __name__ == '__main__':
     main() 
