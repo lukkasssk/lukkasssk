@@ -1,7 +1,7 @@
 {
   "bot_token": "7987163504:AAHGQ3ebgC8TkTASUuoAyTbybMhpk2_IoZA",
-  "admin_id": 6423539592,
-  "admin_user": "saikathesun",
+  "admin_id": 7258291634,
+  "admin_user": "cnpaygateway",
   "pix_demo_qrcode": "00020101021226810014br.gov.bcb.pix2559qr.woovi.com/qr/v2/cob/2365b640-748a-4ba0-8e81-b3bb70abe4bd520400005303986540549.905802BR5911CN_PAY_LTDA6009Sao_Paulo6229052595bf9c63034f4a75b7985d62663046AE6",
   "messages": {
     "welcome": "teste",
