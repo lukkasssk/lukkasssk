@@ -18,6 +18,7 @@ import requests
 import hashlib
 import hmac
 import re
+import pandas as pd
 
 # Banco de dados real, mas só SELECT para usuários
 from database import Database
@@ -123,46 +124,44 @@ def get_active_subscriptions_demo(user_id):
 # Comando /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = load_config()
-    user = update.effective_user
+    user_id = update.effective_user.id
     
-    # Verificar se captura de leads está habilitada
+    # Verificar se o usuário já tem dados completos (versão otimizada)
+    has_email, has_phone = check_user_has_contact_data_optimized(user_id)
+    
+    # Verificar se precisa capturar leads
     lead_capture = config.get('lead_capture', {})
     if lead_capture.get('enabled', False):
-        # Verificar se usuário já tem dados de contato completos
-        if lead_capture.get('skip_existing_users', True):
-            db = DatabaseDemo()
-            try:
-                db.connect()
-                result = db.execute_query("SELECT email, phone FROM users WHERE id = %s", (user.id,))
-                if result:
-                    user_data = result[0]
-                    has_email = bool(user_data.get('email'))
-                    has_phone = bool(user_data.get('phone'))
-                    
-                    # Verificar se precisa de e-mail e telefone
-                    require_email = lead_capture.get('require_email', True)
-                    require_phone = lead_capture.get('require_phone', True)
-                    
-                    # Determinar se está completo
-                    email_ok = not require_email or has_email
-                    phone_ok = not require_phone or has_phone
-                    is_complete = email_ok and phone_ok
-                    
-                    if is_complete:
-                        logger.info(f"ℹ️ Usuário {user.id} já tem dados completos - pulando captura")
-                        # Usuário já tem dados completos, continuar normalmente
-                        await process_start_normal(update, context)
-                        return
-            except Exception as e:
-                logger.error(f"Erro ao verificar dados existentes: {e}")
-            finally:
-                db.close()
+        require_email = lead_capture.get('require_email', True)
+        require_phone = lead_capture.get('require_phone', True)
         
-        # Iniciar captura de dados
-        await start_lead_capture(update, context)
-        return
+        # Verificar se tem todos os dados necessários
+        email_ok = not require_email or has_email
+        phone_ok = not require_phone or has_phone
+        
+        if not (email_ok and phone_ok):
+            # Iniciar captura de leads
+            await start_lead_capture(update, context)
+            return
     
-    # Se captura não estiver habilitada, continuar normalmente
+    # Se chegou aqui, tem dados completos ou captura desabilitada
+    logger.info(f"ℹ️ Usuário {user_id} já tem dados completos - pulando captura")
+    
+    # Salvar usuário no banco (sem webhook para otimizar)
+    db = DatabaseDemo()
+    try:
+        db.connect()
+        existing_user = db.execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
+        if not existing_user:
+            db.execute("INSERT INTO users (id, username, first_name, last_name, joined_date) VALUES (%s, %s, %s, %s, NOW())", 
+                      (user_id, update.effective_user.username, update.effective_user.first_name, update.effective_user.last_name))
+            logger.info(f"✅ Usuário {user_id} salvo no banco (sem webhook)")
+    except Exception as e:
+        logger.error(f"Erro ao salvar usuário: {e}")
+    finally:
+        db.close()
+    
+    # Continuar com o fluxo normal
     await process_start_normal(update, context)
 
 async def start_lead_capture(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -360,7 +359,9 @@ async def handle_pix_demo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def aprovar_pagamento_demo(payment_id, user_id, plan_id, context):
     config = load_config()
-    await asyncio.sleep(3)
+    # Tempo de verificação configurável (padrão: 1 segundo)
+    verification_delay = config.get('verification_delay', 1)
+    await asyncio.sleep(verification_delay)
     MEMORY_PAYMENTS[payment_id]['status'] = 'approved'
     MEMORY_USERS_VIP.add(user_id)
     add_subscription_demo(user_id, plan_id)
@@ -468,7 +469,7 @@ async def testarnotificacao(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Data de expiração: {sub[0]['end_date']}\n\n"
                 f"Para renovar seu acesso VIP, use /start e escolha um novo plano! 🎉"
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # Reduzido de 1 segundo para 0.5 segundos
         # Após a última notificação, simular remoção por falta de pagamento
         config = load_config()
         subs = config.get('subscriptions', [])
@@ -497,7 +498,7 @@ async def testarremocao(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Data de expiração: {sub['end_date']}\n\n"
                 f"Para renovar seu acesso VIP, use /start e escolha um novo plano! 🎉"
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # Reduzido de 1 segundo para 0.5 segundos
         # Mensagem de remoção
         await update.message.reply_text(
             f"🚫 Sua assinatura VIP do plano {sub['plan_name']} foi expirada/removida por falta de renovação (DEMO)."
@@ -890,15 +891,82 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Handler para anexar mídia de boas-vindas
     elif query.data == "admin_attach_welcome_media":
+        config = load_config()
+        welcome_file = config.get('welcome_file', {})
+        has_welcome_media = bool(welcome_file.get('file_id'))
+        
+        if has_welcome_media:
+            # Se já tem mídia, mostrar opções
+            keyboard = [
+                [InlineKeyboardButton("🖼️ Enviar Nova Mídia", callback_data="admin_send_new_welcome_media")],
+                [InlineKeyboardButton("🗑️ Remover Mídia Atual", callback_data="admin_remove_welcome_media")],
+                [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            file_type = welcome_file.get('file_type', 'desconhecido')
+            caption = welcome_file.get('caption', 'Sem legenda')
+            
+            status_text = "🖼️ **Mídia de Boas-vindas**\n\n"
+            status_text += f"📁 **Tipo:** {file_type.title()}\n"
+            status_text += f"📝 **Legenda:** {caption}\n"
+            status_text += f"✅ **Status:** Configurada\n\n"
+            status_text += "Escolha uma opção:"
+            
+            await query.message.edit_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            # Se não tem mídia, pedir para enviar
+            context.user_data['waiting_for_welcome_media'] = True
+            keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data="admin_back")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.edit_text(
+                "🖼️ Anexar Mídia de Boas-vindas\n\n"
+                "Envie uma foto ou vídeo que será usado como mídia de boas-vindas.\n\n"
+                "⚠️ O arquivo deve ser menor que 50MB.",
+                reply_markup=reply_markup
+            )
+        return
+    
+    # Handler para enviar nova mídia
+    elif query.data == "admin_send_new_welcome_media":
         context.user_data['waiting_for_welcome_media'] = True
-        keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data="admin_back")]]
+        keyboard = [[InlineKeyboardButton("❌ Cancelar", callback_data="admin_attach_welcome_media")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.edit_text(
-            "🖼️ Anexar Mídia de Boas-vindas\n\n"
+            "🖼️ Enviar Nova Mídia de Boas-vindas\n\n"
             "Envie uma foto ou vídeo que será usado como mídia de boas-vindas.\n\n"
             "⚠️ O arquivo deve ser menor que 50MB.",
             reply_markup=reply_markup
         )
+        return
+    
+    # Handler para remover mídia atual
+    elif query.data == "admin_remove_welcome_media":
+        config = load_config()
+        if 'welcome_file' in config:
+            config['welcome_file'] = {
+                'file_id': '',
+                'file_type': 'photo',
+                'caption': 'Bem-vindo ao Bot VIP! 🎉'
+            }
+            if save_config(config):
+                await query.answer("✅ Mídia de boas-vindas removida!")
+                # Voltar ao menu de mídia (sem recursão)
+                keyboard = [
+                    [InlineKeyboardButton("🖼️ Enviar Nova Mídia", callback_data="admin_send_new_welcome_media")],
+                    [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                status_text = "🖼️ **Mídia de Boas-vindas**\n\n"
+                status_text += f"❌ **Status:** Nenhuma mídia configurada\n\n"
+                status_text += "Escolha uma opção:"
+                
+                await query.message.edit_text(status_text, reply_markup=reply_markup, parse_mode='Markdown')
+            else:
+                await query.answer("❌ Erro ao remover mídia")
+        else:
+            await query.answer("❌ Nenhuma mídia configurada para remover")
         return
     
     # Handler para usar legenda padrão
@@ -961,9 +1029,49 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         for user in all_users[:5]:
             stats_text += f"• ID: {user['id']}, Nome: {user.get('first_name', 'N/A')}, VIP: {'✅' if user.get('is_vip') else '❌'}\n"
         
-        keyboard = [[InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]]
+        keyboard = [
+            [InlineKeyboardButton("📊 Baixar Excel", callback_data="admin_download_excel")],
+            [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]
+        ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.edit_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+        return
+    
+    # Handler para download do Excel
+    elif query.data == "admin_download_excel":
+        all_users = get_all_users()
+        
+        # Criar DataFrame com os dados
+        data = []
+        for user in all_users:
+            data.append({
+                'ID': user['id'],
+                'Nome': user.get('first_name', 'N/A'),
+                'Sobrenome': user.get('last_name', ''),
+                'Username': user.get('username', 'N/A'),
+                'VIP': 'Sim' if user.get('is_vip') else 'Não',
+                'Data de Entrada': user.get('joined_date', 'N/A')
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Criar arquivo Excel temporário
+        with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as tmp_file:
+            df.to_excel(tmp_file.name, index=False, engine='openpyxl')
+            
+            # Enviar arquivo
+            with open(tmp_file.name, 'rb') as file:
+                await context.bot.send_document(
+                    chat_id=query.message.chat_id,
+                    document=file,
+                    filename=f'estatisticas_bot_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx',
+                    caption="📊 Estatísticas do Bot em Excel"
+                )
+            
+            # Limpar arquivo temporário
+            os.unlink(tmp_file.name)
+        
+        await query.answer("✅ Arquivo Excel enviado!")
         return
     
     # Handler para usuários
@@ -1182,7 +1290,7 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['alterando_telefone'] = True
         
         keyboard = [
-            [InlineKeyboardButton("📱 Compartilhar Contato", callback_data="compartilhar_contato")],
+            [InlineKeyboardButton("📱 Compartilhar Contato", request_contact=True)],
             [InlineKeyboardButton("✏️ Digitar Manualmente", callback_data="digitar_telefone")],
             [InlineKeyboardButton("❌ Cancelar", callback_data="cancelar_alteracao")]
         ]
@@ -1662,31 +1770,45 @@ def check_user_has_contact_data(user_id):
         db.close()
 
 def save_user_contact_data(user_id, email=None, phone=None):
-    """Salva dados de contato do usuário"""
+    """Salva dados de contato do usuário no banco de dados"""
     db = DatabaseDemo()
     try:
         db.connect()
         
-        # Preparar campos para atualização
-        update_fields = []
-        params = []
+        # Verificar se usuário já existe
+        existing_user = db.execute_query("SELECT id FROM users WHERE id = %s", (user_id,))
         
-        if email:
-            update_fields.append("email = %s")
-            params.append(email)
-        
-        if phone:
-            update_fields.append("phone = %s")
-            params.append(phone)
-        
-        if update_fields:
-            params.append(user_id)
-            query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
-            db.execute(query, params)
+        if existing_user:
+            # Atualizar usuário existente
+            update_fields = []
+            params = []
             
-            logger.info(f"Dados de contato salvos para usuário {user_id}: email={email}, phone={phone}")
-            return True
+            if email is not None:
+                update_fields.append("email = %s")
+                params.append(email)
             
+            if phone is not None:
+                update_fields.append("phone = %s")
+                params.append(phone)
+            
+            if update_fields:
+                params.append(user_id)
+                query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s"
+                db.execute(query, params)
+                logger.info(f"✅ Dados de contato atualizados para usuário {user_id}")
+        else:
+            # Inserir novo usuário
+            db.execute(
+                "INSERT INTO users (id, email, phone, joined_date) VALUES (%s, %s, %s, NOW())",
+                (user_id, email, phone)
+            )
+            logger.info(f"✅ Novo usuário criado com dados de contato: {user_id}")
+        
+        # Limpar cache do usuário após alteração
+        clear_user_cache(user_id)
+        
+        return True
+        
     except Exception as e:
         logger.error(f"Erro ao salvar dados de contato: {e}")
         return False
@@ -1901,6 +2023,32 @@ async def finish_lead_capture(update: Update, context: ContextTypes.DEFAULT_TYPE
             "database_checked": True
         }
         await send_webhook("user_start", webhook_data)
+        
+        # Notificar admin no Telegram apenas se notify_admin for true
+        notify_admin = config.get('notify_admin', False)
+        if notify_admin:
+            try:
+                admin_id = config.get('admin_id')
+                if admin_id:
+                    admin_msg = f"👤 **Novo Lead Capturado!**\n\n"
+                    admin_msg += f"🆔 **ID:** `{user_id}`\n"
+                    admin_msg += f"👤 **Nome:** {update.effective_user.first_name} {update.effective_user.last_name or ''}\n"
+                    admin_msg += f"🔗 **Username:** @{update.effective_user.username or 'N/A'}\n"
+                    admin_msg += f"📧 **E-mail:** {user_data.get('email', '❌ Não informado')}\n"
+                    admin_msg += f"📱 **Telefone:** {user_data.get('phone', '❌ Não informado')}\n"
+                    admin_msg += f"✅ **Status:** {'Completo' if is_complete else 'Incompleto'}\n"
+                    admin_msg += f"⏰ **Data:** {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+                    
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=admin_msg,
+                        parse_mode='Markdown'
+                    )
+                    logger.info(f"📢 Admin notificado sobre novo lead: {user_id}")
+            except Exception as e:
+                logger.error(f"Erro ao notificar admin: {e}")
+        else:
+            logger.info(f"📢 Notificação de admin desabilitada para lead: {user_id}")
         
         if is_complete:
             logger.info(f"✅ Lead completo para usuário {user_id} - webhook enviado")
@@ -2315,6 +2463,73 @@ def migrar_invite_links():
     save_config(config)
 
 # Para rodar manualmente, basta chamar migrar_invite_links() no Python shell ou em algum comando temporário.
+
+# Cache para otimizar verificações
+USER_CACHE = {}
+CACHE_TIMEOUT = 30  # segundos
+
+def get_cached_user_data(user_id):
+    """Obtém dados do usuário do cache se ainda válido"""
+    if user_id in USER_CACHE:
+        cache_time, data = USER_CACHE[user_id]
+        if (datetime.now() - cache_time).seconds < CACHE_TIMEOUT:
+            return data
+        else:
+            del USER_CACHE[user_id]
+    return None
+
+def cache_user_data(user_id, data):
+    """Armazena dados do usuário no cache"""
+    USER_CACHE[user_id] = (datetime.now(), data)
+
+def clear_user_cache(user_id=None):
+    """Limpa o cache do usuário"""
+    if user_id:
+        USER_CACHE.pop(user_id, None)
+    else:
+        USER_CACHE.clear()
+
+# Função otimizada para verificar dados do usuário
+def check_user_has_contact_data_optimized(user_id):
+    """Versão otimizada com cache para verificar dados de contato"""
+    # Verificar cache primeiro
+    cached_data = get_cached_user_data(user_id)
+    if cached_data is not None:
+        return cached_data.get('has_email', False), cached_data.get('has_phone', False)
+    
+    # Se não está no cache, consultar banco
+    db = DatabaseDemo()
+    try:
+        db.connect()
+        result = db.execute_query("SELECT email, phone FROM users WHERE id = %s", (user_id,))
+        if result:
+            user_data = result[0]
+            has_email = bool(user_data.get('email'))
+            has_phone = bool(user_data.get('phone'))
+            
+            # Armazenar no cache
+            cache_user_data(user_id, {
+                'has_email': has_email,
+                'has_phone': has_phone,
+                'email': user_data.get('email'),
+                'phone': user_data.get('phone')
+            })
+            
+            return has_email, has_phone
+        else:
+            # Usuário não encontrado, cache negativo
+            cache_user_data(user_id, {
+                'has_email': False,
+                'has_phone': False,
+                'email': None,
+                'phone': None
+            })
+            return False, False
+    except Exception as e:
+        logger.error(f"Erro ao verificar dados de contato: {e}")
+        return False, False
+    finally:
+        db.close()
 
 if __name__ == '__main__':
     main() 
