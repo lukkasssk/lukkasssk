@@ -3,3 +3,5 @@ mysql-connector-python
 Pillow
 qrcode
 requests
+pandas
+openpyxl 
