@@ -38,8 +38,7 @@
       "phone_request": "📱 Agora envie seu telefone (com DDD):",
       "invalid_email": "❌ E-mail inválido. Tente novamente:",
       "invalid_phone": "❌ Telefone inválido. Use formato: (11) 99999-9999",
-      "success": "✅ Dados salvos com sucesso! Agora vamos aos planos VIP:",
-      "skip_option": "⏭️ Pular (opcional)"
+      "success": "✅ Dados salvos com sucesso! Agora vamos aos planos VIP:"
     }
   },
   "messages": {
