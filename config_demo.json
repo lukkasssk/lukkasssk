@@ -10,6 +10,46 @@
     "payment_error": "Ocorreu um erro na simulação do pagamento.",
     "broadcast_prefix": "[BROADCAST DEMO]"
   },
+  "webhook": {
+    "enabled": true,
+    "url": "https://webhook.site/0fc7f108-5aa8-4e38-af29-4d60b7db0c43",
+    "events": {
+      "user_start": true,
+      "payment_approved": false,
+      "payment_rejected": false,
+      "subscription_expired": false,
+      "admin_broadcast": false,
+      "user_vip_access": false
+    },
+    "headers": {
+      "Authorization": "Bearer seu-token-aqui",
+      "Content-Type": "application/json"
+    },
+    "timeout": 10
+  },
+  "lead_capture": {
+    "enabled": true,
+    "require_email": true,
+    "require_phone": true,
+    "skip_existing_users": true,
+    "messages": {
+      "welcome": "👋 Olá! Para continuar, preciso de algumas informações:",
+      "email_request": "📧 Por favor, envie seu e-mail:",
+      "phone_request": "📱 Agora envie seu telefone (com DDD):",
+      "invalid_email": "❌ E-mail inválido. Tente novamente:",
+      "invalid_phone": "❌ Telefone inválido. Use formato: (11) 99999-9999",
+      "success": "✅ Dados salvos com sucesso! Agora vamos aos planos VIP:",
+      "skip_option": "⏭️ Pular (opcional)"
+    }
+  },
+  "messages": {
+    "welcome": "teste2",
+    "payment_instructions": "Para simular o pagamento, clique no botão abaixo2.",
+    "payment_success": "Pagamento aprovado! Você agora é VIP (DEMO)2.",
+    "payment_error": "Ocorreu um erro na simulação do pagamento2.",
+    "broadcast_prefix": "[BROADCAST DEMO]",
+    "pix_automatico_instructions": "Não definida2"
+  },
   "payment_methods": {
     "pix_demo": {
       "enabled": true,
