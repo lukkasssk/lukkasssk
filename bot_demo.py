@@ -1029,16 +1029,37 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         for user in all_users[:5]:
             stats_text += f"• ID: {user['id']}, Nome: {user.get('first_name', 'N/A')}, VIP: {'✅' if user.get('is_vip') else '❌'}\n"
         
-        keyboard = [
-            [InlineKeyboardButton("📊 Baixar Excel", callback_data="admin_download_excel")],
-            [InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")]
-        ]
+        # Verificar se é admin para mostrar botão de download
+        config = load_config()
+        admin_id = config.get('admin_id')
+        admin_user = config.get('admin_user')
+        user_id = query.from_user.id
+        username = query.from_user.username
+        is_admin = (user_id == admin_id) and (username == admin_user)
+        
+        keyboard = []
+        if is_admin:
+            keyboard.append([InlineKeyboardButton("📊 Baixar Excel", callback_data="admin_download_excel")])
+        keyboard.append([InlineKeyboardButton("⬅️ Voltar", callback_data="admin_back")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.edit_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
         return
     
     # Handler para download do Excel
     elif query.data == "admin_download_excel":
+        # Verificar se é admin (ID + username)
+        config = load_config()
+        admin_id = config.get('admin_id')
+        admin_user = config.get('admin_user')
+        user_id = query.from_user.id
+        username = query.from_user.username
+        is_admin = (user_id == admin_id) and (username == admin_user)
+        
+        if not is_admin:
+            await query.answer("❌ Acesso negado. Apenas administradores podem baixar o Excel.")
+            return
+        
         all_users = get_all_users()
         
         # Criar DataFrame com os dados
